@@ -1,0 +1,79 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
+    environment {
+        SCANNER_HOME = tool 'mysonar'
+    }
+        stages {
+            stage (" Clean WS") {
+                steps {
+                    cleanWs()
+                }
+            }
+            stage ("code") {
+                steps {
+                    git "https://github.com/devops0014/Zomato-Project.git"
+                }
+            }
+            stage ("CQA") {
+                steps {
+                    withSonarQubeEnv('mysonar') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=zomato \
+                    -Dsonar.projectKey=zomato '''
+                }
+            }
+        }
+        stage ("quality gate") {
+                steps {
+                    script {
+                        waitForQualityGate abortPipeline: false, credentialsID: "mysonar"
+                    }
+                }
+        }
+        stage ("install dependency") {
+            steps {
+                sh 'npm install'
+            }
+        }
+        stage ("Dependency check") {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'Dp-check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage ("Trivy") {
+            steps {
+                sh 'trivy fs . > trivyfs.txt'
+            }
+        }
+        stage ("build docker image") {
+            steps {
+                sh 'docker build -t image1 .'
+                sh 'docker tag image1 sreenu5743/sreenu:sreedockerimage'
+            }
+        }
+        stage ("docker push image") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerhub') {
+                        sh 'docker push sreenu5743/sreenu:sreedockerimage'
+                        
+                    }
+                }
+            }
+        }
+        stage ("scan image") {
+            steps {
+                sh 'trivy image sreenu5743/sreenu:sreedockerimage'
+            }
+        }
+        stage ("Deploy") {
+            steps {
+                sh 'docker run -d --name cont-1 -p 3000:3000 sreenu5743/sreenu:sreedockerimage'
+            }
+        }
+    }
+}
