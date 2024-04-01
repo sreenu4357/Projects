@@ -1,0 +1,72 @@
+pipeline {
+    agent any 
+    tools {
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
+    environment {
+        SCANNER_HOME = tool 'mysonar'
+    }
+    stages {
+        stage ("clean ws") {
+            steps {
+                cleanWs()
+            }
+        }
+        stage ("code") {
+            steps {
+                git 'https://github.com/sreenu4357/k8s-project.git'
+            }
+        }
+        stage ("CQA") {
+            steps {
+                withSonarQubeEnv('mysonar') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=game \
+                    -Dsonar.projectKey=game '''
+                }
+            }
+        }
+        stage ("Quality Gate") {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsID: "mysonar"
+                }
+            }
+        }
+        stage ("Dependcies install") {
+            steps {
+                sh 'npm install'
+            }
+        }
+        stage ("OWASP") {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'Dp-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage ("trivy") {
+            steps {
+                sh 'trivy fs . > trivyfs.txt'
+            }
+        }
+        stage ("docker build") {
+            steps {
+                sh 'docker build -t sreenu5743/k8srepo:imagegame .'
+            }
+        }
+        stage ("scan image") {
+            steps {
+                sh 'trivy image sreenu5743/k8srepo:imagegame'
+            }
+        }
+        stage ("docker push") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerpassword') {
+                        sh 'docker push sreenu5743/k8srepo:imagegame'
+                    }
+                }
+            }
+        }
+    }
+}
